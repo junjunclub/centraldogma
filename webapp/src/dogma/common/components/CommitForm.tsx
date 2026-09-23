@@ -6,7 +6,8 @@ import { newNotification } from 'dogma/features/notification/notificationSlice';
 import ErrorMessageParser from 'dogma/features/services/ErrorMessageParser';
 import { useAppDispatch } from 'dogma/hooks';
 import { useForm } from 'react-hook-form';
-import { detectChangeType } from 'dogma/features/file/StructuredFileSupport';
+import { detectChangeType, guessChangeType } from 'dogma/features/file/StructuredFileSupport';
+import { FILE_NAME_PATTERN } from 'dogma/util/path-util';
 
 type FormData = {
   summary: string;
@@ -18,11 +19,14 @@ export type CommitFormProps = {
   repoName: string;
   path: string;
   name: string;
+  // The new file name when the file is renamed. The original name is used if not specified.
+  newName?: string;
   content: () => string;
   readOnly: boolean;
   setReadOnly: (readOnly: boolean) => void;
   switchMode: () => void;
   handleTabChange: (index: number) => void;
+  onRenamed?: (newPath: string) => void;
 };
 
 export const CommitForm = ({
@@ -30,47 +34,72 @@ export const CommitForm = ({
   repoName,
   path,
   name,
+  newName,
   content,
   readOnly,
   setReadOnly,
   switchMode,
   handleTabChange,
+  onRenamed,
 }: CommitFormProps) => {
   const [updateFile, { isLoading }] = usePushFileChangesMutation();
   const { register, handleSubmit, reset } = useForm<FormData>();
   const dispatch = useAppDispatch();
   const onSubmit = async (formData: FormData) => {
     const newContent = content();
+    const targetName = newName || name;
+    const renamed = targetName !== name;
+    if (renamed && !FILE_NAME_PATTERN.test(targetName)) {
+      dispatch(newNotification('Invalid file name.', `'${targetName}' is not a valid file name.`, 'error'));
+      return;
+    }
+    const newPath = renamed ? path.substring(0, path.lastIndexOf('/') + 1) + targetName : path;
     let changeType;
     try {
-      changeType = detectChangeType(name, newContent);
+      changeType = detectChangeType(targetName, newContent);
     } catch (error) {
       dispatch(newNotification(`Invalid file content.`, ErrorMessageParser.parse(error), 'error'));
       return;
     }
+
+    const changes = [];
+    if (renamed) {
+      const oldChangeType = guessChangeType(name);
+      if (oldChangeType !== changeType && changeType !== 'UPSERT_TEXT' && oldChangeType !== 'UPSERT_JSON') {
+        // The server validates the old content against the new entry type when renaming.
+        // Update the old file with the new content first so that the validation passes.
+        // e.g. foo.txt -> foo.json, foo.yaml -> foo.json
+        // A JSON file does not need it because JSON is also valid YAML.
+        changes.push({ path, type: oldChangeType, rawContent: newContent });
+      }
+      // RENAME fails if a file already exists at the new path, which prevents overwriting it.
+      changes.push({ path, type: 'RENAME', content: newPath });
+    }
+    changes.push({ path: newPath, type: changeType, rawContent: newContent });
 
     const data = {
       commitMessage: {
         summary: formData.summary,
         detail: formData.detail,
       },
-      changes: [
-        {
-          path: path,
-          type: changeType,
-          rawContent: newContent,
-        },
-      ],
+      changes,
     };
     try {
       const response = await updateFile({ projectName, repoName, data }).unwrap();
       if ((response as { error: FetchBaseQueryError | SerializedError }).error) {
         throw (response as { error: FetchBaseQueryError | SerializedError }).error;
       }
-      dispatch(newNotification('File updated', `Successfully updated ${path}`, 'success'));
+      if (renamed) {
+        dispatch(newNotification('File renamed', `Successfully renamed ${path} to ${newPath}`, 'success'));
+      } else {
+        dispatch(newNotification('File updated', `Successfully updated ${path}`, 'success'));
+      }
       setReadOnly(true);
       reset();
       handleTabChange(0);
+      if (renamed) {
+        onRenamed?.(newPath);
+      }
     } catch (error) {
       dispatch(newNotification(`Failed to update ${path}`, ErrorMessageParser.parse(error), 'error'));
     }

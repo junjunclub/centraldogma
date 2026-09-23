@@ -4,6 +4,9 @@ import {
   Divider,
   Flex,
   Heading,
+  Input,
+  InputGroup,
+  InputLeftAddon,
   Spacer,
   Tab,
   TabList,
@@ -32,6 +35,7 @@ import { useLocalMonaco } from 'dogma/features/file/MonacoLoader';
 import { Loading } from 'dogma/common/components/Loading';
 import { useGetFileContentQuery } from 'dogma/features/api/apiSlice';
 import ErrorMessageParser from 'dogma/features/services/ErrorMessageParser';
+import { FILE_NAME_PATTERN } from 'dogma/util/path-util';
 
 export type FileEditorProps = {
   projectName: string;
@@ -93,9 +97,11 @@ const FileEditor = ({
   const { isOpen: isCancelModalOpen, onOpen: onCancelModalOpen, onClose: onCancelModalClose } = useDisclosure();
   const { isOpen: isDeleteModalOpen, onOpen: onDeleteModalOpen, onClose: onDeleteModalClose } = useDisclosure();
   const [readOnly, setReadOnly] = useState(true);
+  const [newName, setNewName] = useState(name);
   const switchMode = () => {
     if (readOnly) {
       setFileContent(displayContent);
+      setNewName(name);
       setReadOnly(false);
     } else {
       onCancelModalOpen();
@@ -103,6 +109,7 @@ const FileEditor = ({
   };
   const resetViewEditor = () => {
     editorRef.current.setValue(fileContent);
+    setNewName(name);
     setReadOnly(true);
     setTabIndex(0);
     onCancelModalClose();
@@ -154,6 +161,17 @@ const FileEditor = ({
   return (
     <Box>
       <Flex gap={4}>
+        {!readOnly && (
+          <InputGroup size="sm" maxW="lg">
+            <InputLeftAddon>{path.substring(0, path.lastIndexOf('/') + 1)}</InputLeftAddon>
+            <Input
+              aria-label="File name"
+              value={newName}
+              isInvalid={!FILE_NAME_PATTERN.test(newName)}
+              onChange={(e) => setNewName(e.target.value)}
+            />
+          </InputGroup>
+        )}
         <Spacer />
         <Button
           size={'sm'}
@@ -294,11 +312,15 @@ const FileEditor = ({
         repoName={repoName}
         path={path}
         name={name}
+        newName={newName}
         content={() => editorRef?.current?.getValue()}
         readOnly={readOnly}
         setReadOnly={setReadOnly}
         switchMode={switchMode}
         handleTabChange={handleTabChange}
+        onRenamed={(newPath) => {
+          Router.replace(`/app/projects/${projectName}/repos/${repoName}/files/head${newPath}`);
+        }}
       />
       <DiscardChangesModal
         isOpen={isCancelModalOpen}

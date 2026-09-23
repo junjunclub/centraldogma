@@ -2,6 +2,17 @@ import { isJson, isJson5, isYaml } from 'dogma/util/path-util';
 import JSON5 from 'json5';
 import YAML from 'yaml';
 
+// Returns the upsert change type for the file name without validating its content.
+export function guessChangeType(fileName: string): string {
+  if (isJson(fileName) || isJson5(fileName)) {
+    return 'UPSERT_JSON';
+  } else if (isYaml(fileName)) {
+    return 'UPSERT_YAML';
+  } else {
+    return 'UPSERT_TEXT';
+  }
+}
+
 export function detectChangeType(fileName: string, content: string): string {
   if (isJson(fileName)) {
     // Parse content to validate JSON format

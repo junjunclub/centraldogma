@@ -34,8 +34,7 @@ import { registerJson5Language } from 'dogma/features/file/Json5Language';
 import { detectChangeType } from 'dogma/features/file/StructuredFileSupport';
 import { useLocalMonaco } from 'dogma/features/file/MonacoLoader';
 import { Loading } from 'dogma/common/components/Loading';
-
-const FILE_PATH_PATTERN = /^[-_.0-9a-zA-Z]*[-_0-9a-zA-Z]+$/;
+import { FILE_NAME_PATTERN } from 'dogma/util/path-util';
 
 type FormData = {
   name: string;
@@ -148,7 +147,7 @@ export const NewFile = ({
                 type="text"
                 value={fileName}
                 placeholder="Type 1) a file name 2) a directory name and '/' key or 3) 'backspace' key to go one directory up."
-                {...register('name', { pattern: FILE_PATH_PATTERN })}
+                {...register('name', { pattern: FILE_NAME_PATTERN })}
                 onChange={handleFileNameInput}
                 onKeyDown={handleShortcut}
               />
