@@ -9,11 +9,16 @@ const mockPush = jest.fn((..._args: unknown[]) => ({ unwrap: mockUnwrap }));
 // The ESM-only 'yaml' package cannot be loaded by Jest. YAML files are not covered by these tests.
 jest.mock('yaml', () => ({ __esModule: true, default: { parse: jest.fn(), stringify: jest.fn() } }));
 
+const mockGetFileUnwrap = jest.fn();
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const mockGetFile = jest.fn((..._args: unknown[]) => ({ unwrap: mockGetFileUnwrap }));
+
 jest.mock('dogma/features/api/apiSlice', () => {
   const actual = jest.requireActual('dogma/features/api/apiSlice');
   return {
     ...actual,
     usePushFileChangesMutation: () => [mockPush, { isLoading: false }],
+    useLazyGetFileContentQuery: () => [mockGetFile, { isFetching: false }],
   };
 });
 
@@ -47,6 +52,10 @@ describe('CommitForm', () => {
     mockPush.mockClear();
     mockUnwrap.mockReset();
     mockUnwrap.mockResolvedValue({});
+    mockGetFile.mockClear();
+    mockGetFileUnwrap.mockReset();
+    // Nothing exists at the new path by default.
+    mockGetFileUnwrap.mockRejectedValue({ status: 404, data: {} });
   });
 
   it('upserts the file when it is not renamed', async () => {
@@ -89,6 +98,41 @@ describe('CommitForm', () => {
       { path: '/a/b.json', type: 'RENAME', content: '/a/b.txt' },
       { path: '/a/b.txt', type: 'UPSERT_TEXT', rawContent: 'plain text' },
     ]);
+  });
+
+  it('does not push when a file exists at the new path', async () => {
+    mockGetFileUnwrap.mockResolvedValue({ path: '/a/c.json' });
+    renderCommitForm({ newName: 'c.json' });
+
+    await waitFor(() => expect(mockGetFile).toHaveBeenCalledTimes(1));
+    expect(mockGetFile.mock.calls[0][0]).toMatchObject({ filePath: '/a/c.json', revision: 'head' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('does not push when a directory exists at the new path', async () => {
+    // The server responds with 204 No Content for a directory.
+    mockGetFileUnwrap.mockResolvedValue(undefined);
+    renderCommitForm({ newName: 'c' });
+
+    await waitFor(() => expect(mockGetFile).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('does not push when the new file name is empty', async () => {
+    renderCommitForm({ newName: '', content: () => '{"a": 2}' });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockGetFile).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('does not check the path when the file is not renamed', async () => {
+    renderCommitForm({ newName: 'b.json' });
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
+    expect(mockGetFile).not.toHaveBeenCalled();
   });
 
   it('does not push when the new file name is invalid', async () => {

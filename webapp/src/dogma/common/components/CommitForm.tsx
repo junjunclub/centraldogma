@@ -1,7 +1,7 @@
 import { Button, FormControl, Heading, Input, Stack, Textarea, VStack } from '@chakra-ui/react';
 import { SerializedError } from '@reduxjs/toolkit';
 import { FetchBaseQueryError } from '@reduxjs/toolkit/query';
-import { usePushFileChangesMutation } from 'dogma/features/api/apiSlice';
+import { useLazyGetFileContentQuery, usePushFileChangesMutation } from 'dogma/features/api/apiSlice';
 import { newNotification } from 'dogma/features/notification/notificationSlice';
 import ErrorMessageParser from 'dogma/features/services/ErrorMessageParser';
 import { useAppDispatch } from 'dogma/hooks';
@@ -43,11 +43,13 @@ export const CommitForm = ({
   onRenamed,
 }: CommitFormProps) => {
   const [updateFile, { isLoading }] = usePushFileChangesMutation();
+  const [getFileContent, { isFetching: isCheckingFile }] = useLazyGetFileContentQuery();
   const { register, handleSubmit, reset } = useForm<FormData>();
   const dispatch = useAppDispatch();
   const onSubmit = async (formData: FormData) => {
     const newContent = content();
-    const targetName = newName || name;
+    // An empty new name is invalid rather than falling back to the original name.
+    const targetName = newName ?? name;
     const renamed = targetName !== name;
     if (renamed && !FILE_NAME_PATTERN.test(targetName)) {
       dispatch(newNotification('Invalid file name.', `'${targetName}' is not a valid file name.`, 'error'));
@@ -62,6 +64,21 @@ export const CommitForm = ({
       return;
     }
 
+    if (renamed) {
+      // The server does not reject renaming a file to the path of an existing directory,
+      // which replaces the whole directory with the file. Check the new path beforehand.
+      try {
+        await getFileContent({ projectName, repoName, filePath: newPath, revision: 'head' }).unwrap();
+        dispatch(newNotification(`Failed to update ${path}`, `${newPath} already exists.`, 'error'));
+        return;
+      } catch (error) {
+        if ((error as FetchBaseQueryError).status !== 404) {
+          dispatch(newNotification(`Failed to update ${path}`, ErrorMessageParser.parse(error), 'error'));
+          return;
+        }
+      }
+    }
+
     const changes = [];
     if (renamed) {
       const oldChangeType = guessChangeType(name);
@@ -72,7 +89,7 @@ export const CommitForm = ({
         // A JSON file does not need it because JSON is also valid YAML.
         changes.push({ path, type: oldChangeType, rawContent: newContent });
       }
-      // RENAME fails if a file already exists at the new path, which prevents overwriting it.
+      // RENAME also fails if a file already exists at the new path, which prevents overwriting it.
       changes.push({ path, type: 'RENAME', content: newPath });
     }
     changes.push({ path: newPath, type: changeType, rawContent: newContent });
@@ -124,7 +141,12 @@ export const CommitForm = ({
           {...register('detail')}
         />
         <Stack direction="row" spacing={4} mt={2}>
-          <Button type="submit" colorScheme="teal" isLoading={isLoading} loadingText="Creating">
+          <Button
+            type="submit"
+            colorScheme="teal"
+            isLoading={isLoading || isCheckingFile}
+            loadingText="Creating"
+          >
             Commit
           </Button>
           <Button variant="outline" onClick={switchMode}>
