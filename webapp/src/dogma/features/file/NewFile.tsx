@@ -101,7 +101,7 @@ export const NewFile = ({
       if ((response as { error: FetchBaseQueryError | SerializedError }).error) {
         throw (response as { error: FetchBaseQueryError | SerializedError }).error;
       }
-      Router.push(`/app/projects/${projectName}/repos/${repoName}/tree/head${`/${prefixes.join('/')}`}`);
+      Router.push(`/app/projects/${projectName}/repos/${repoName}/tree/head/${prefixes.join('/')}`);
       reset();
       dispatch(newNotification('New file created', `Successfully created ${data.changes[0].path}`, 'success'));
     } catch (error) {
@@ -109,8 +109,7 @@ export const NewFile = ({
     }
   };
   const onSubmit = async (formData: FormData) => {
-    let path = `${prefixes.join('/')}/${formData.name}`;
-    path = path.startsWith('/') ? path : `/${path}`;
+    const path = `/${[...prefixes, formData.name].join('/')}`;
     const content = editorRef.current.getValue();
     let changeType;
     try {
